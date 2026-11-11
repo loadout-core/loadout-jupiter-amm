@@ -1,0 +1,11 @@
+[package]
+name = "loadout-math"
+version = "0.1.0"
+description = "Shared no-std math library for Loadout bonding curve calculations"
+edition = "2021"
+license = "Apache-2.0"
+
+[features]
+default = []
+
+[dependencies]

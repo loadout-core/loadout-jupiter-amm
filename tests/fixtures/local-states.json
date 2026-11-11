@@ -1,0 +1,31 @@
+{
+  "rpc": "http://127.0.0.1:48899",
+  "createdAt": "2026-10-15T20:31:44.800Z",
+  "states": {
+    "active": {
+      "projectId": "195",
+      "curve": "8gMCp3MpUN6nJ9N2nwjuefrqK6rp6Mrvpnqn1pjUvmwn",
+      "mint": "FYAtF53vvGe7yiMwoZqMWB58Ay8bL2vDXyyqqUY7rxyX"
+    },
+    "protected": {
+      "projectId": "196",
+      "curve": "5o56bndGq6YFZFwCTuCmZv42g89bi6gdhC2TEeRYaFbo",
+      "mint": "ExhuRAo89M2hicTGmQ2yrQYLFR2iMAUGWe3koi9rFSmW"
+    },
+    "near-target": {
+      "projectId": "197",
+      "curve": "9pN9gVHZXHYoPdW44i7RCS14kBcQdsFGqh3NL1F6tTvX",
+      "mint": "6uxXs1T7pA82vzJwbcfWtypXP5D1S8jjkxE1ksTihymV"
+    },
+    "completed": {
+      "projectId": "198",
+      "curve": "3XPTRRAfv2BjTeJx29FUvb5rXGxZffx5Pimjdw9ZVUcZ",
+      "mint": "CpyRVx5oGjBKWFrLycNBXpPVzvukgBN98REAEwhAM3Y1"
+    },
+    "graduated": {
+      "projectId": "189",
+      "curve": "J4WEXs4WBgga81c1JEGXL2rvxwzCRskrz5JhC5zxT97C",
+      "mint": "D93fSh33FDbhYRXwKxKWHVi5ZhmN49Cj9UfrN4GoDPYm"
+    }
+  }
+}

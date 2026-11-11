@@ -1,0 +1,29 @@
+name: Offline adapter checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+      - name: Verify mainnet program fixture
+        run: sha256sum --check tests/fixtures/loadout.so.sha256
+      - name: Fetch locked build dependencies
+        run: cargo +1.95.0 fetch --locked
+      - name: Check formatting
+        run: cargo +1.95.0 fmt --all --check
+      - name: Lint offline
+        run: cargo +1.95.0 clippy --workspace --all-targets --frozen -- -D warnings
+      - name: Test offline without RPC feature
+        run: cargo +1.95.0 test --workspace --frozen

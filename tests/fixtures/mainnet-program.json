@@ -1,0 +1,10 @@
+{
+  "program_id": "8nPyghXuy35JwxZ8ANAzxMXKruibh6B3js4QMYBRFadx",
+  "programdata_address": "13vr9ps8P1RMsFZvjQAPgaL3VVgSWwGxRvnkHR3SDnMb",
+  "genesis_hash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "observed_finalized_slot": 467786841,
+  "deployment_slot": 462007838,
+  "artifact_sha256": "502c4e1bc928f5fd21c5eb3e25a3466c43601b1871a8b85283633d9bed3aca5f",
+  "artifact_bytes": 1280224,
+  "source": "Read-only dump of finalized mainnet ProgramData; no source-commit equivalence asserted."
+}
