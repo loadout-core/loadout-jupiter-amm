@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "program_id": "8nPyghXuy35JwxZ8ANAzxMXKruibh6B3js4QMYBRFadx",
+  "profiles": [
+    {
+      "profile": "legacy",
+      "fixture": "loadout.so",
+      "sha256": "502c4e1bc928f5fd21c5eb3e25a3466c43601b1871a8b85283633d9bed3aca5f",
+      "bytes": 1280224,
+      "origin": "historical mainnet dump"
+    },
+    {
+      "profile": "nominated",
+      "fixture": "nominated.so",
+      "sha256": "2f22227f7c1aad7ab1ca6069ed61cf93b8e3a557ba43e1ca75cfd7992adddccb",
+      "bytes": 1280224,
+      "origin": "mainnet dump"
+    },
+    {
+      "profile": "preview",
+      "fixture": "next.so",
+      "sha256": "ec84130583e9994d41ce6514322533fec902955ad38986cd382b6cf02b5e5a27",
+      "bytes": 1248104,
+      "origin": "local preview build"
+    }
+  ],
+  "current_observation": {
+    "finalized_slot": 471151312,
+    "deployment_slot": 470593349
+  },
+  "limits": [
+    "The mainnet dump does not establish source-commit equivalence.",
+    "The preview artifact is a local build, not a deployment assertion.",
+    "Scenario accounts are historical snapshots and synthetic copies, not live market discovery."
+  ],
+  "preview_programdata_envelope": {
+    "payload_bytes": 1280224,
+    "zero_padding_bytes": 32120,
+    "sha256": "da8a8e27fa44668929a2df000ece1e0d1865573f209a59e9867e35bc09dcc8bb",
+    "meaning": "The same preview ELF padded to the currently observed mainnet allocation; not evidence of a future deployment."
+  },
+  "integration_interface_builds": {
+    "interface.so": {
+      "sha256": "cf928f02310606de75e3f190593c6684115df91faa3d6e6e363d1a648896af78",
+      "bytes": 1322736,
+      "features": [],
+      "binding": "Schema-1 publisher with quote profile 2; discovered through publication, not a built-in fingerprint.",
+      "deployment": "Local build, not deployed."
+    },
+    "interface-no-log.so": {
+      "sha256": "a881f78044f995bbee2d3ec79d2d47cad62c9cf374e2c806eac2436d80d67dd7",
+      "bytes": 1315752,
+      "features": [
+        "no-log-ix-name"
+      ],
+      "binding": "The same profile-2 publisher with instruction-name logging disabled; discovered through publication.",
+      "deployment": "Local build, not deployed."
+    },
+    "nominated-interface.so": {
+      "sha256": "2d6ea6074cc5f3125cbcc3758dba4c7d3dd779bc6a2782ad2eef4196d8e34dc4",
+      "bytes": 1130056,
+      "features": [],
+      "quote_version": 1,
+      "binding": "Schema-1 publisher with quote profile 1, preserving Nominated trading behavior and account layouts.",
+      "deployment": "Local prototype, not deployed."
+    },
+    "develop-interface.so": {
+      "sha256": "7e4947ed13c13b982b48aa5b2f12de1454fb922c7050651dd40fc31adfd98489",
+      "bytes": 982776,
+      "features": [],
+      "quote_version": 0,
+      "binding": "Schema-1 publisher with quote profile 0: global fees, fillable remainder guard and deferred trader accounts.",
+      "deployment": "Local interface-only PR build, not deployed."
+    }
+  }
+}
