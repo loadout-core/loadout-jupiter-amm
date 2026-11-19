@@ -34,6 +34,11 @@ pub struct BondingCurve {
     pub is_active: bool,
     /// Unix time of the first buy that reached the target; 0 if never.
     pub completed_at: i64,
+    pub fee_snapshot: u8,
+    pub treasury_fee_bps: u16,
+    pub protocol_fee_bps: u16,
+    pub sniper_share_bps: u16,
+    pub fee_flags: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +52,7 @@ pub struct Project {
     pub protected_launch_duration: u32,
     pub protected_launch_fee_bps: u16,
     pub paused: bool,
+    pub buyback_bps: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +63,8 @@ pub struct FeeConfig {
     pub paused: bool,
     /// 0 = the program's default (24 hours).
     pub curve_escape_delay_seconds: u32,
+    pub sniper_share_bps: u16,
+    pub fee_flags: u8,
 }
 
 impl BondingCurve {
@@ -78,6 +86,11 @@ impl BondingCurve {
             is_active: bool_at(d, 88)?,
             // bump 89
             completed_at: i64::from_le_bytes(bytes_at(d, 90)),
+            fee_snapshot: d[114],
+            treasury_fee_bps: u16::from_le_bytes(bytes_at(d, 115)),
+            protocol_fee_bps: u16::from_le_bytes(bytes_at(d, 117)),
+            sniper_share_bps: u16::from_le_bytes(bytes_at(d, 119)),
+            fee_flags: d[121],
         })
     }
 }
@@ -99,6 +112,7 @@ impl Project {
             protected_launch_duration: u32::from_le_bytes(bytes_at(d, 786)),
             protected_launch_fee_bps: u16::from_le_bytes(bytes_at(d, 790)),
             paused: bool_at(d, 792)?,
+            buyback_bps: u16::from_le_bytes(bytes_at(d, 793)),
         })
     }
 }
@@ -114,6 +128,8 @@ impl FeeConfig {
             paused: bool_at(d, 108)?,
             // next_project_id 109 .. router_fees_disabled 229
             curve_escape_delay_seconds: u32::from_le_bytes(bytes_at(d, 230)),
+            sniper_share_bps: u16::from_le_bytes(bytes_at(d, 254)),
+            fee_flags: d[258],
         })
     }
 }
