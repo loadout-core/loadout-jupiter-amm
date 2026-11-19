@@ -80,7 +80,7 @@ impl Lab {
         let mut svm = LiteSVM::new();
         svm.add_program(
             LOADOUT_PROGRAM_ID,
-            &std::fs::read("tests/fixtures/loadout.so").unwrap(),
+            &std::fs::read(snapshot.program_path).unwrap(),
         )
         .unwrap();
         svm.add_builtin(PROBE_ID, Relay::register);
