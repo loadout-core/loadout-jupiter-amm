@@ -303,6 +303,53 @@ fn real_loader_upgrade_rejects_insufficient_capacity_then_requires_fresh_metadat
     assert!(lab.amm().is_ok());
 }
 #[test]
+fn extending_a_published_program_requires_a_fresh_descriptor() {
+    let authority = Keypair::new();
+    let mut lab = Lab::new("tests/fixtures/interface.so", &authority);
+    lab.seed_market();
+    let ix = lab.publish(authority.pubkey(), lab.slot(), lab.hash());
+    lab.send(&[ix], &[&authority]).unwrap();
+    let mut cached = lab.amm().unwrap();
+    assert!(cached.is_active());
+
+    let program_data = runtime::program_data_address();
+    let original = lab.svm.get_account(&program_data).unwrap();
+    let original_hash = lab.hash();
+    let extra_bytes = 65_536;
+    lab.svm.warp_to_slot(110);
+    lab.send(
+        &[loader::extend_program(
+            &LOADOUT_PROGRAM_ID,
+            Some(&lab.payer.pubkey()),
+            extra_bytes,
+        )],
+        &[],
+    )
+    .unwrap();
+    lab.svm.warp_to_slot(111);
+    let extended = lab.svm.get_account(&program_data).unwrap();
+    let (original_payload, extension) = extended.data[45..].split_at(original.data.len() - 45);
+    assert_eq!(original_payload, &original.data[45..]);
+    assert_eq!(extension, vec![0; extra_bytes as usize]);
+    assert_ne!(lab.hash(), original_hash);
+
+    let error = cached.update(Bank(&lab.svm)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("integration descriptor does not match the deployed executable"),
+        "{error}"
+    );
+    assert!(!cached.is_active());
+    let ix = lab.publish(authority.pubkey(), lab.slot(), lab.hash());
+    lab.send(&[ix], &[&authority]).unwrap();
+    cached.update(Bank(&lab.svm)).unwrap();
+    assert!(cached.is_active());
+    assert_eq!(cached.market().unwrap().runtime, runtime::Runtime::Preview);
+    assert_upgrade_trade_pair(&mut lab);
+}
+
+#[test]
 fn first_upgrade_cannot_invoke_a_new_instruction_in_the_same_transaction() {
     let authority = Keypair::new();
     let mut lab = Lab::new("tests/fixtures/nominated.so", &authority);
@@ -820,11 +867,7 @@ fn assert_upgrade_trade_pair(lab: &mut Lab) {
     }
 }
 
-fn assert_supported_upgrade_sequence(
-    bridge: &str,
-    profile: u16,
-    expected_runtime: runtime::Runtime,
-) {
+fn assert_supported_upgrade_sequence(phases: &[(&str, u64, u16, runtime::Runtime)]) {
     let authority = Keypair::new();
     let mut lab = Lab::new("tests/fixtures/nominated.so", &authority);
     lab.seed_market();
@@ -846,17 +889,7 @@ fn assert_supported_upgrade_sequence(
     .unwrap();
     lab.svm.warp_to_slot(105);
     cached.update(Bank(&lab.svm)).unwrap();
-    let phases = [
-        (bridge, 110, profile, expected_runtime),
-        (
-            "tests/fixtures/interface.so",
-            120,
-            2,
-            runtime::Runtime::Preview,
-        ),
-        (bridge, 130, profile, expected_runtime),
-    ];
-    for (path, slot, version, expected) in phases {
+    for &(path, slot, version, expected) in phases {
         let curve_before = lab.svm.get_account(&ACTIVE.parse().unwrap()).unwrap();
         let buffer = lab.buffer(path, authority.pubkey());
         lab.svm.warp_to_slot(slot);
@@ -888,7 +921,7 @@ fn assert_supported_upgrade_sequence(
             .unwrap();
         assert!(
             runtime::Runtime::decode(&pd.data, &pd.owner).is_err(),
-            "prototype has no SDK fingerprint"
+            "candidate must be admitted through its descriptor"
         );
         lab.svm.warp_to_slot(slot + 1);
         let ix = lab.publish(authority.pubkey(), lab.slot(), lab.hash());
@@ -931,12 +964,28 @@ fn assert_supported_upgrade_sequence(
 }
 
 #[test]
+fn one_sdk_survives_nominated_to_combined_and_rollback() {
+    let combined = match std::env::var("LOADOUT_COMBINED_CORE_ELF") {
+        Ok(path) => path,
+        Err(std::env::VarError::NotPresent) => "tests/fixtures/interface.so".into(),
+        Err(err) => panic!("invalid LOADOUT_COMBINED_CORE_ELF: {err}"),
+    };
+    assert_supported_upgrade_sequence(&[(&combined, 120, 2, runtime::Runtime::Preview)]);
+}
+
+#[test]
 fn one_sdk_survives_nominated_bridge_preview_and_both_rollbacks() {
-    assert_supported_upgrade_sequence(
-        "tests/fixtures/nominated-interface.so",
-        1,
-        runtime::Runtime::Nominated,
-    );
+    let bridge = "tests/fixtures/nominated-interface.so";
+    assert_supported_upgrade_sequence(&[
+        (bridge, 110, 1, runtime::Runtime::Nominated),
+        (
+            "tests/fixtures/interface.so",
+            120,
+            2,
+            runtime::Runtime::Preview,
+        ),
+        (bridge, 130, 1, runtime::Runtime::Nominated),
+    ]);
 }
 
 #[test]
@@ -975,11 +1024,17 @@ fn nominated_bridge_publisher_preserves_authority_checks_and_fixes_version_one()
 
 #[test]
 fn schema_one_supports_mainnet_develop_core_preview_and_rollbacks() {
-    assert_supported_upgrade_sequence(
-        "tests/fixtures/develop-interface.so",
-        0,
-        runtime::Runtime::Develop,
-    );
+    let bridge = "tests/fixtures/develop-interface.so";
+    assert_supported_upgrade_sequence(&[
+        (bridge, 110, 0, runtime::Runtime::Develop),
+        (
+            "tests/fixtures/interface.so",
+            120,
+            2,
+            runtime::Runtime::Preview,
+        ),
+        (bridge, 130, 0, runtime::Runtime::Develop),
+    ]);
 }
 
 #[test]

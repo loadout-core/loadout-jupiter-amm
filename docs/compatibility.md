@@ -68,6 +68,12 @@ slot (`UnsupportedProgramId`), so upgrade and publication cannot be atomic. Unkn
 code stays unavailable for quoting until matching metadata reaches the host cache.
 Compatible builds need fresh publication and validation, without an SDK source edit.
 
+Extending a descriptor-dependent ProgramData allocation changes the full-payload
+hash even if the executable is unchanged. After an extension or rollback to a
+descriptor-dependent build, publish the actual payload hash and loader slot, then
+verify that the host has resumed quotes. Built-in historical fallbacks can recover
+without publication when their executable identity is still recognized.
+
 Hosts must refresh both ProgramData and the descriptor and tolerate an absent optional
 PDA. Out-of-order account updates fail closed. The preview publisher fixture requires
 more capacity than the captured mainnet allocation; capacity extension, upgrade and
@@ -80,6 +86,22 @@ Program. No descriptor account is forwarded into swaps. No public-chain transact
 is performed by the default checks.
 
 ## Offline verification
+
+If an intermediate release keeps Core byte-identical, validate the direct Nominated
+to Combined path with the frozen SDK checkout. In release verification, record the
+Combined ELF checksum and supply the actual artifact:
+
+```sh
+LOADOUT_COMBINED_CORE_ELF=/absolute/path/to/loadout_core.so \
+  cargo test --locked --test integration_runtime \
+  one_sdk_survives_nominated_to_combined_and_rollback -- --exact
+```
+
+The default CI invocation uses the checked-in fixture. The release invocation
+checks the supplied Core artifact against the captured Nominated curve, including
+trade parity, descriptor publication and rollback. Verify planned ProgramData
+capacity and host refresh separately. If an intermediate release changes Core,
+include its actual Core binary and selected profile in the compatibility rehearsal.
 
 Historical tests remain. `integration_runtime.rs` executes publication, loader upgrades,
 capacity extension, authority rotation, rollback, prefunding, pause, replay and failed
