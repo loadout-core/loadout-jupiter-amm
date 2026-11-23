@@ -1604,7 +1604,7 @@ dependencies = [
 
 [[package]]
 name = "loadout-jupiter-amm"
-version = "0.1.0"
+version = "0.4.0-prototype.1"
 dependencies = [
  "base64",
  "bincode",
@@ -1614,12 +1614,14 @@ dependencies = [
  "loadout-math",
  "rust_decimal",
  "serde_json",
+ "sha2 0.10.9",
  "solana-account",
  "solana-clock",
  "solana-compute-budget-interface",
  "solana-instruction",
  "solana-instruction-error",
  "solana-keypair",
+ "solana-loader-v3-interface 8.0.1",
  "solana-program-runtime",
  "solana-pubkey 4.2.0",
  "solana-signer",
@@ -1629,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "loadout-math"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "lock_api"

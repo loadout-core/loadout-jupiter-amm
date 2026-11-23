@@ -17,8 +17,8 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
-      - name: Verify mainnet program fixture
-        run: sha256sum --check tests/fixtures/loadout.so.sha256
+      - name: Verify executable fixtures
+        run: sha256sum --check tests/fixtures/releases.sha256
       - name: Fetch locked build dependencies
         run: cargo +1.95.0 fetch --locked
       - name: Check formatting

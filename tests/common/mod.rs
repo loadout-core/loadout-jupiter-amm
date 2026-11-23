@@ -36,6 +36,7 @@ const REFERRAL_BINDING_LEN: usize = 113;
 pub struct Snapshot {
     pub curve: Pubkey,
     pub accounts: HashMap<Pubkey, Account>,
+    pub program_path: &'static str,
 }
 
 impl Snapshot {
@@ -49,7 +50,11 @@ impl Snapshot {
             let file = std::fs::File::open(&path).expect("fixture");
             accounts.insert(key, bincode::deserialize_from(file).expect("account"));
         }
-        Self { curve, accounts }
+        Self {
+            curve,
+            accounts,
+            program_path: "tests/fixtures/loadout.so",
+        }
     }
 
     pub fn clock(&self) -> Clock {
@@ -142,8 +147,7 @@ pub struct Session {
 impl Session {
     pub fn new(snapshot: &Snapshot, at: Option<i64>) -> Self {
         let mut svm = LiteSVM::new();
-        let program =
-            std::fs::read("tests/fixtures/loadout.so").expect("tests/fixtures/loadout.so");
+        let program = std::fs::read(snapshot.program_path).expect("program fixture");
         svm.add_program(LOADOUT_PROGRAM_ID, &program)
             .expect("add program");
         for (key, account) in &snapshot.accounts {
@@ -279,18 +283,22 @@ impl Session {
         }
         let wallet_delta = i128::from(balance(svm, &trader.pubkey())) - i128::from(before_wallet);
         let rent = balance(svm, &rebate) + balance(svm, &binding) - before_rent;
-        let expected_rent = [
-            (rebate, TRADER_REBATE_ACCOUNT_LEN),
-            (binding, REFERRAL_BINDING_LEN),
-        ]
-        .into_iter()
-        .filter(|(key, _)| {
-            tracked
-                .iter()
-                .any(|(k, a)| k == key && a.as_ref().is_none_or(|a| a.lamports == 0))
-        })
-        .map(|(_, len)| svm.minimum_balance_for_rent_exemption(len))
-        .sum::<u64>();
+        let expected_rent = if self.original.program_path == "tests/fixtures/next.so" {
+            0
+        } else {
+            [
+                (rebate, TRADER_REBATE_ACCOUNT_LEN),
+                (binding, REFERRAL_BINDING_LEN),
+            ]
+            .into_iter()
+            .filter(|(key, _)| {
+                tracked
+                    .iter()
+                    .any(|(k, a)| k == key && a.as_ref().is_none_or(|a| a.lamports == 0))
+            })
+            .map(|(_, len)| svm.minimum_balance_for_rent_exemption(len))
+            .sum::<u64>()
+        };
         assert_eq!(
             rent, expected_rent,
             "observed account funding must equal expected rent"

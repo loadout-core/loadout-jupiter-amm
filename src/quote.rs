@@ -7,8 +7,9 @@
 
 use loadout_math::{constant_product, fees};
 
-use crate::QuoteError;
 use crate::state::{BondingCurve, FeeConfig, PROJECT_STATE_LIVE, Project};
+use crate::{QuoteError, runtime::Runtime};
+use loadout_math::constant_product::SwapResult;
 
 /// `DEFAULT_CURVE_ESCAPE_DELAY_SECONDS` in the mainnet build of `loadout-core`: how long sells
 /// stay closed on a completed curve when `FeeConfig.curve_escape_delay_seconds` is 0.
@@ -20,6 +21,7 @@ pub struct Market {
     pub curve: BondingCurve,
     pub project: Project,
     pub fee_config: FeeConfig,
+    pub runtime: Runtime,
 }
 
 /// A trade's outcome: what the trader pays in, receives, and the fees taken (in lamports).
@@ -29,6 +31,10 @@ pub struct Fill {
     pub out_amount: u64,
     pub treasury_fee: u64,
     pub protocol_fee: u64,
+    /// Curve state after the trader swap and any inline buyback.
+    pub after: SwapResult,
+    pub buyback_sol: u64,
+    pub buyback_tokens: u64,
 }
 
 impl Fill {
@@ -41,11 +47,7 @@ impl Fill {
 /// carry the curve past its target is filled only up to it and charged only the gross that
 /// buys that much, so `in_amount` can be less than `sol_amount`.
 pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteError> {
-    let Market {
-        curve,
-        project,
-        fee_config,
-    } = market;
+    let Market { curve, project, .. } = market;
     check_accounts(market)?;
     if curve.reserve_sol >= project.treasury_target {
         return Err(QuoteError::CurveComplete);
@@ -54,8 +56,8 @@ pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteErro
         return Err(QuoteError::ZeroAmount);
     }
 
-    let treasury_bps = protected_launch_treasury_bps(project, now, fee_config.treasury_fee_bps)?;
-    let protocol_bps = fee_config.protocol_fee_bps;
+    let (normal_bps, protocol_bps, sniper_share, flags) = effective_fees(market);
+    let treasury_bps = protected_launch_treasury_bps(project, now, normal_bps)?;
     // The deployed program rejects this before fee splitting or curve math.
     if u32::from(treasury_bps) + u32::from(protocol_bps) >= 10_000 {
         return Err(QuoteError::TradeFeeTooHigh);
@@ -91,7 +93,28 @@ pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteErro
         return Err(QuoteError::InvariantViolation);
     }
 
+    if market.runtime != Runtime::Legacy {
+        require_fillable_remainder(&swap, project.treasury_target, treasury_bps, protocol_bps)?;
+    }
+    let sniper = sniper_protocol_part(charged, treasury_fee, normal_bps, sniper_share)?;
+    treasury_fee = treasury_fee
+        .checked_sub(sniper)
+        .ok_or(QuoteError::MathOverflow)?;
+    protocol_fee = protocol_fee
+        .checked_add(sniper)
+        .ok_or(QuoteError::MathOverflow)?;
+    let (buyback_sol, buyback_tokens, after) = after_buyback(
+        market,
+        swap,
+        treasury_fee,
+        treasury_bps,
+        protocol_bps,
+        flags,
+    )?;
     Ok(Fill {
+        after,
+        buyback_sol,
+        buyback_tokens,
         in_amount: charged,
         out_amount: swap.amount_out,
         treasury_fee,
@@ -102,9 +125,7 @@ pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteErro
 /// `sell(token_amount)` at unix time `now`: lamports out, after fees, for `token_amount` tokens.
 /// Sells pay the normal treasury fee: the protected-launch fee applies to buys only.
 pub fn sell(market: &Market, token_amount: u64, now: i64) -> Result<Fill, QuoteError> {
-    let Market {
-        curve, fee_config, ..
-    } = market;
+    let Market { curve, .. } = market;
     check_accounts(market)?;
     if token_amount == 0 {
         return Err(QuoteError::ZeroAmount);
@@ -122,16 +143,25 @@ pub fn sell(market: &Market, token_amount: u64, now: i64) -> Result<Fill, QuoteE
         token_amount,
     )
     .ok_or(QuoteError::MathOverflow)?;
-    let (treasury_fee, protocol_fee, net_sol_out) = split_fees(
-        swap.amount_out,
-        fee_config.treasury_fee_bps,
-        fee_config.protocol_fee_bps,
-    )?;
+    let (treasury_bps, protocol_bps, _, flags) = effective_fees(market);
+    let (treasury_fee, protocol_fee, net_sol_out) =
+        split_fees(swap.amount_out, treasury_bps, protocol_bps)?;
     if swap.new_k < curve.invariant_k {
         return Err(QuoteError::InvariantViolation);
     }
 
+    let (buyback_sol, buyback_tokens, after) = after_buyback(
+        market,
+        swap,
+        treasury_fee,
+        treasury_bps,
+        protocol_bps,
+        flags,
+    )?;
     Ok(Fill {
+        after,
+        buyback_sol,
+        buyback_tokens,
         in_amount: token_amount,
         out_amount: net_sol_out,
         treasury_fee,
@@ -145,6 +175,7 @@ fn check_accounts(market: &Market) -> Result<(), QuoteError> {
         curve,
         project,
         fee_config,
+        ..
     } = market;
     if fee_config.paused {
         return Err(QuoteError::ProtocolPaused);
@@ -173,6 +204,7 @@ pub fn sells_open(market: &Market, now: i64) -> Result<bool, QuoteError> {
         curve,
         project,
         fee_config,
+        ..
     } = market;
     if curve.reserve_sol < project.treasury_target || curve.completed_at <= 0 {
         return Ok(true);
@@ -224,4 +256,84 @@ fn split_fees(
     protocol_bps: u16,
 ) -> Result<(u64, u64, u64), QuoteError> {
     fees::split_fees(amount, treasury_bps, protocol_bps).ok_or(QuoteError::FeeCalculationFailed)
+}
+
+/// The executable determines whether reserved bytes have fee-setting semantics.
+fn effective_fees(market: &Market) -> (u16, u16, u16, u8) {
+    let c = market.curve;
+    let f = market.fee_config;
+    if matches!(market.runtime, Runtime::Nominated | Runtime::Preview) && c.fee_snapshot != 0 {
+        (
+            c.treasury_fee_bps,
+            c.protocol_fee_bps,
+            c.sniper_share_bps,
+            c.fee_flags,
+        )
+    } else {
+        (
+            f.treasury_fee_bps,
+            f.protocol_fee_bps,
+            if matches!(market.runtime, Runtime::Legacy | Runtime::Develop) {
+                0
+            } else {
+                f.sniper_share_bps
+            },
+            if matches!(market.runtime, Runtime::Legacy | Runtime::Develop) {
+                0
+            } else {
+                f.fee_flags
+            },
+        )
+    }
+}
+
+fn sniper_protocol_part(
+    gross: u64,
+    treasury: u64,
+    normal: u16,
+    share: u16,
+) -> Result<u64, QuoteError> {
+    loadout_math::transition::sniper_protocol_part(gross, treasury, normal, share)
+        .ok_or(QuoteError::FeeCalculationFailed)
+}
+
+fn require_fillable_remainder(
+    swap: &SwapResult,
+    target: u64,
+    treasury: u16,
+    protocol: u16,
+) -> Result<(), QuoteError> {
+    if loadout_math::transition::remainder_fillable(swap, target, treasury, protocol) {
+        Ok(())
+    } else {
+        Err(QuoteError::CurveCompletionUnfillable)
+    }
+}
+
+fn after_buyback(
+    market: &Market,
+    swap: SwapResult,
+    treasury_fee: u64,
+    treasury: u16,
+    protocol: u16,
+    flags: u8,
+) -> Result<(u64, u64, SwapResult), QuoteError> {
+    // FEE_FLAG_BUYBACK_ON_TRADE. The nominated release reserves this flag but refuses activation.
+    if market.runtime != Runtime::Preview || flags & 2 == 0 {
+        return Ok((0, 0, swap));
+    }
+    let due = fees::floor_fee(treasury_fee, market.project.buyback_bps)
+        .ok_or(QuoteError::MathOverflow)?;
+    Ok(
+        match loadout_math::transition::inline_buyback(
+            &swap,
+            due,
+            market.project.treasury_target,
+            treasury,
+            protocol,
+        ) {
+            Some((spend, after)) => (spend, after.amount_out, after),
+            None => (0, 0, swap),
+        },
+    )
 }

@@ -11,6 +11,7 @@
 //! lamports from the trader's wallet and `sell` pays lamports to it.
 
 pub mod quote;
+pub mod runtime;
 pub mod state;
 
 use std::sync::{OnceLock, atomic::Ordering};
@@ -57,6 +58,7 @@ pub enum QuoteError {
     TradeFeeTooHigh,
     ProjectPaused,
     CurveComplete,
+    CurveCompletionUnfillable,
     InvalidAccount(String),
     Unsupported(String),
 }
@@ -75,6 +77,7 @@ impl QuoteError {
             Self::TradeFeeTooHigh => 12220,
             Self::ProjectPaused => 12120,
             Self::CurveComplete => 12140,
+            Self::CurveCompletionUnfillable => 12221,
             Self::InvalidAccount(_) | Self::Unsupported(_) => return None,
         })
     }
@@ -163,6 +166,8 @@ pub struct LoadoutCurve {
     curve: BondingCurve,
     project: Option<Project>,
     fee_config: Option<FeeConfig>,
+    runtime: Option<runtime::Runtime>,
+    deployment: Option<runtime::Deployment>,
 }
 
 single_program_amm!(LoadoutCurve, LOADOUT_PROGRAM_ID, LABEL);
@@ -170,8 +175,9 @@ single_program_amm!(LoadoutCurve, LOADOUT_PROGRAM_ID, LABEL);
 impl LoadoutCurve {
     /// The state a quote needs, once `update` has loaded it.
     pub fn market(&self) -> Result<Market, QuoteError> {
-        match (self.project, self.fee_config) {
-            (Some(project), Some(fee_config)) => Ok(Market {
+        match (self.project, self.fee_config, self.runtime) {
+            (Some(project), Some(fee_config), Some(runtime)) => Ok(Market {
+                runtime,
                 curve: self.curve,
                 project,
                 fee_config,
@@ -238,6 +244,8 @@ impl Amm for LoadoutCurve {
             curve,
             project: None,
             fee_config: None,
+            runtime: None,
+            deployment: runtime::Deployment::from_params(keyed_account.params.as_ref())?,
         })
     }
 
@@ -262,10 +270,33 @@ impl Amm for LoadoutCurve {
             self.accounts.bonding_curve,
             self.accounts.project,
             self.accounts.fee_config,
+            runtime::program_data_address(),
+            runtime::integration_config_address(),
         ]
     }
 
     fn update(&mut self, account_provider: impl AccountProvider) -> Result<(), AmmError> {
+        // Failed refreshes must not leave an older quoteable market behind.
+        self.runtime = None;
+        self.project = None;
+        self.fee_config = None;
+        let program_data_address = runtime::program_data_address();
+        let program = account_provider.try_get(&program_data_address)?;
+        let descriptor_address = runtime::integration_config_address();
+        let descriptor = account_provider.get(&descriptor_address);
+        // A nonexistent PDA may be absent or represented by an empty, zero-lamport account.
+        let descriptor = descriptor
+            .as_ref()
+            .filter(|a| a.lamports() != 0 || !a.data().is_empty());
+        let runtime = match runtime::historical_zero_extension(program.data(), program.owner()) {
+            Some(runtime) => runtime,
+            None => runtime::Runtime::resolve(
+                program.data(),
+                program.owner(),
+                descriptor.map(|a| (a.data(), a.owner())),
+                self.deployment,
+            )?,
+        };
         let curve = Self::read(
             &account_provider,
             &self.accounts.bonding_curve,
@@ -288,6 +319,7 @@ impl Amm for LoadoutCurve {
         self.curve = curve;
         self.project = Some(project);
         self.fee_config = Some(fee_config);
+        self.runtime = Some(runtime);
         Ok(())
     }
 
@@ -349,6 +381,9 @@ impl Amm for LoadoutCurve {
             AccountMeta::new(protocol_fee_shard(&trader), false),
             AccountMeta::new_readonly(LOADOUT_PROGRAM_ID, false), // referrer_account: none
             AccountMeta::new_readonly(LOADOUT_PROGRAM_ID, false), // l2_referrer_account: none
+            // Nominated-era Core initializes both accounts for first-time traders.
+            // Keep the legacy write privilege even though the preview profile marks
+            // referral_binding readonly; these metas support both executables.
             AccountMeta::new(rebate, false),
             AccountMeta::new(binding, false),
             AccountMeta::new(token_account, false),
