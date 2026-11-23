@@ -10,6 +10,7 @@
 //! own math (`loadout-math`). Both instructions move native SOL, not wrapped SOL: `buy` takes
 //! lamports from the trader's wallet and `sell` pays lamports to it.
 
+mod program_data;
 pub mod quote;
 pub mod state;
 
@@ -55,6 +56,7 @@ pub enum QuoteError {
     InvariantViolation,
     FeeCalculationFailed,
     TradeFeeTooHigh,
+    CurveCompletionUnfillable,
     ProjectPaused,
     CurveComplete,
     InvalidAccount(String),
@@ -73,6 +75,7 @@ impl QuoteError {
             Self::InvariantViolation => 12023,
             Self::FeeCalculationFailed => 12025,
             Self::TradeFeeTooHigh => 12220,
+            Self::CurveCompletionUnfillable => 12221,
             Self::ProjectPaused => 12120,
             Self::CurveComplete => 12140,
             Self::InvalidAccount(_) | Self::Unsupported(_) => return None,
@@ -262,10 +265,15 @@ impl Amm for LoadoutCurve {
             self.accounts.bonding_curve,
             self.accounts.project,
             self.accounts.fee_config,
+            program_data::ADDRESS,
         ]
     }
 
     fn update(&mut self, account_provider: impl AccountProvider) -> Result<(), AmmError> {
+        self.project = None;
+        self.fee_config = None;
+        let program = account_provider.try_get(&program_data::ADDRESS)?;
+        program_data::validate(program.owner(), program.data())?;
         let curve = Self::read(
             &account_provider,
             &self.accounts.bonding_curve,

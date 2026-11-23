@@ -6,9 +6,11 @@ trading moves to Meteora DAMM v2.
 
 ## Quoting
 
-The adapter reads the curve, project and fee configuration from account data supplied
-by Jupiter. It makes no network calls. It supports ExactIn buys and sells, including
-protected-launch fees, capped input near the graduation target and trading-state checks.
+The adapter targets the deployed Nominated release. Jupiter supplies the curve, project,
+fee configuration and canonical Core ProgramData. A successful refresh verifies the
+deployed executable before quoting. The adapter makes no network calls.
+It supports ExactIn buys and sells, including captured curve fees, protected-launch
+fees, capped input near the graduation target and trading-state checks.
 ExactOut is unsupported. Interface and test kit use matching pinned revisions of
 Jupiter interface 0.7.0.
 
@@ -36,7 +38,8 @@ SHA-256. The official test kit and both supplemental harnesses load the same
 `tests/fixtures/loadout.so`. No program deployment or public-chain transaction is
 performed by the default checks.
 
-Account inputs comprise five local-validator snapshots and one public devnet capture.
+Market inputs comprise five local-validator snapshots and one public devnet capture.
+Each scenario also supplies the deployed mainnet ProgramData to the adapter.
 They are historical state fixtures, not a claim that these are live mainnet markets.
 Time and boundary cases change copies in memory. The vendored `loadout-math` supplies
 the curve and fee arithmetic; update quotes and fixtures together when deployed

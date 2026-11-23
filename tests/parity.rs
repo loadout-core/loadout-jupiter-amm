@@ -498,7 +498,16 @@ fn small_supply_boundary_quotes_match_deployed_execution() {
         f[104..106].copy_from_slice(&100u16.to_le_bytes());
         f[106..108].copy_from_slice(&400u16.to_le_bytes());
         let gross = loadout_math::fees::gross_for_net(85 * SOL - gap, 400, 100).unwrap();
+        if matches!(gap, 1 | 440) {
+            let error = typed_quote(&s, Side::Buy, gross, None).unwrap_err();
+            assert_eq!(error.code(), Some(12221), "unfillable gap {gap}");
+            assert!(assert_parity(&s, Side::Buy, gross, None).is_none());
+            continue;
+        }
         let fill = assert_parity(&s, Side::Buy, gross, None);
-        assert!(fill.is_some(), "deployed program accepts gap {gap}");
+        assert!(
+            fill.is_some(),
+            "deployed Nominated program accepts gap {gap}"
+        );
     }
 }
