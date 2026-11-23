@@ -1614,6 +1614,7 @@ dependencies = [
  "loadout-math",
  "rust_decimal",
  "serde_json",
+ "sha2 0.10.9",
  "solana-account",
  "solana-clock",
  "solana-compute-budget-interface",

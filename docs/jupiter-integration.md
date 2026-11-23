@@ -7,19 +7,23 @@ Each market key is its 154-byte `BondingCurve` account. The reserve mints are th
 native SOL mint and the project's SPL token mint. The adapter validates account
 owners, canonical curve derivation, project IDs and token mint consistency.
 
-`get_accounts_to_update` returns the curve, project and fee configuration.
-`update` deserializes their cached data. `quote` uses that state and Jupiter's clock;
-no network request or transaction occurs during quoting.
+`get_accounts_to_update` returns the curve, project, fee configuration and Core
+ProgramData. `update` checks the loader owner and pinned Nominated payload hash.
+Zero-filled capacity extensions are supported. Missing or unrecognized ProgramData
+invalidates the market. `quote` uses the refreshed state and Jupiter's clock without
+network calls.
 
 ## Quote behavior
 
 ExactIn buys and sells reproduce the deployed program's constant-product virtual
 reserve math, rounding, treasury/protocol fees and protected-launch buy fee window.
+The adapter uses captured curve fees when present and global fees for older curves
+without a snapshot. The protocol can receive a share of the excess protected fee.
 Fees are denominated in SOL. A capped buy can consume less input than offered.
 A completed curve refuses buys; sells follow its configured escape delay while the
 project remains Live. Paused, inactive or graduated markets are refused as applicable.
 Quotes do not include transaction fees, token-account setup or first-trade trader rent.
-The deployed program does not apply an additional refusal for an unfillable final gap.
+Nominated refuses buys that would leave an unfillable final gap to graduation.
 
 All interface `FlowType` values currently use the same on-chain amounts and fees.
 ExactOut and referrer-specific swap routing are not implemented.

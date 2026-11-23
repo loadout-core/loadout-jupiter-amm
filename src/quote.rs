@@ -5,7 +5,10 @@
 //! would, with the instruction's error. Trades through Jupiter carry no referrer, so the
 //! referral split never applies: the fee is the treasury fee plus the protocol fee.
 
-use loadout_math::{constant_product, fees};
+use loadout_math::{
+    constant_product::{self, SwapResult},
+    fees,
+};
 
 use crate::QuoteError;
 use crate::state::{BondingCurve, FeeConfig, PROJECT_STATE_LIVE, Project};
@@ -29,6 +32,7 @@ pub struct Fill {
     pub out_amount: u64,
     pub treasury_fee: u64,
     pub protocol_fee: u64,
+    pub after: SwapResult,
 }
 
 impl Fill {
@@ -41,11 +45,7 @@ impl Fill {
 /// carry the curve past its target is filled only up to it and charged only the gross that
 /// buys that much, so `in_amount` can be less than `sol_amount`.
 pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteError> {
-    let Market {
-        curve,
-        project,
-        fee_config,
-    } = market;
+    let Market { curve, project, .. } = market;
     check_accounts(market)?;
     if curve.reserve_sol >= project.treasury_target {
         return Err(QuoteError::CurveComplete);
@@ -54,8 +54,8 @@ pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteErro
         return Err(QuoteError::ZeroAmount);
     }
 
-    let treasury_bps = protected_launch_treasury_bps(project, now, fee_config.treasury_fee_bps)?;
-    let protocol_bps = fee_config.protocol_fee_bps;
+    let (normal_bps, protocol_bps, sniper_share) = effective_fees(market);
+    let treasury_bps = protected_launch_treasury_bps(project, now, normal_bps)?;
     // The deployed program rejects this before fee splitting or curve math.
     if u32::from(treasury_bps) + u32::from(protocol_bps) >= 10_000 {
         return Err(QuoteError::TradeFeeTooHigh);
@@ -90,21 +90,35 @@ pub fn buy(market: &Market, sol_amount: u64, now: i64) -> Result<Fill, QuoteErro
     if swap.new_k < curve.invariant_k {
         return Err(QuoteError::InvariantViolation);
     }
+    if !remainder_fillable(&swap, project.treasury_target, treasury_bps, protocol_bps) {
+        return Err(QuoteError::CurveCompletionUnfillable);
+    }
+    if sniper_share != 0 {
+        let normal =
+            fees::calculate_fee(charged, normal_bps).ok_or(QuoteError::FeeCalculationFailed)?;
+        let sniper_fee = fees::floor_fee(treasury_fee.saturating_sub(normal), sniper_share)
+            .ok_or(QuoteError::FeeCalculationFailed)?;
+        treasury_fee = treasury_fee
+            .checked_sub(sniper_fee)
+            .ok_or(QuoteError::MathOverflow)?;
+        protocol_fee = protocol_fee
+            .checked_add(sniper_fee)
+            .ok_or(QuoteError::MathOverflow)?;
+    }
 
     Ok(Fill {
         in_amount: charged,
         out_amount: swap.amount_out,
         treasury_fee,
         protocol_fee,
+        after: swap,
     })
 }
 
 /// `sell(token_amount)` at unix time `now`: lamports out, after fees, for `token_amount` tokens.
 /// Sells pay the normal treasury fee: the protected-launch fee applies to buys only.
 pub fn sell(market: &Market, token_amount: u64, now: i64) -> Result<Fill, QuoteError> {
-    let Market {
-        curve, fee_config, ..
-    } = market;
+    let curve = &market.curve;
     check_accounts(market)?;
     if token_amount == 0 {
         return Err(QuoteError::ZeroAmount);
@@ -122,11 +136,9 @@ pub fn sell(market: &Market, token_amount: u64, now: i64) -> Result<Fill, QuoteE
         token_amount,
     )
     .ok_or(QuoteError::MathOverflow)?;
-    let (treasury_fee, protocol_fee, net_sol_out) = split_fees(
-        swap.amount_out,
-        fee_config.treasury_fee_bps,
-        fee_config.protocol_fee_bps,
-    )?;
+    let (treasury_bps, protocol_bps, _) = effective_fees(market);
+    let (treasury_fee, protocol_fee, net_sol_out) =
+        split_fees(swap.amount_out, treasury_bps, protocol_bps)?;
     if swap.new_k < curve.invariant_k {
         return Err(QuoteError::InvariantViolation);
     }
@@ -136,7 +148,54 @@ pub fn sell(market: &Market, token_amount: u64, now: i64) -> Result<Fill, QuoteE
         out_amount: net_sol_out,
         treasury_fee,
         protocol_fee,
+        after: swap,
     })
+}
+
+fn effective_fees(market: &Market) -> (u16, u16, u16) {
+    let curve = &market.curve;
+    if curve.fee_snapshot != 0 {
+        (
+            curve.treasury_fee_bps,
+            curve.protocol_fee_bps,
+            curve.sniper_share_bps,
+        )
+    } else {
+        let config = &market.fee_config;
+        (
+            config.treasury_fee_bps,
+            config.protocol_fee_bps,
+            config.sniper_share_bps,
+        )
+    }
+}
+
+// Nominated refuses a buy if the remaining SOL gap cannot buy one token unit.
+fn remainder_fillable(
+    after: &SwapResult,
+    target: u64,
+    treasury_bps: u16,
+    protocol_bps: u16,
+) -> bool {
+    if after.new_reserve_sol >= target {
+        return true;
+    }
+    let remaining = target - after.new_reserve_sol;
+    let can_fill = |net| {
+        constant_product::calculate_buy(
+            after.new_virtual_sol,
+            after.new_virtual_token,
+            after.new_reserve_sol,
+            after.new_reserve_token,
+            after.new_k,
+            net,
+        )
+        .is_some()
+    };
+    can_fill(remaining)
+        || fees::gross_for_net(remaining, treasury_bps, protocol_bps)
+            .and_then(|gross| fees::split_fees(gross, treasury_bps, protocol_bps))
+            .is_some_and(|(_, _, net)| can_fill(net))
 }
 
 /// The constraints `buy` and `sell` share on their accounts, in their declaration order.
